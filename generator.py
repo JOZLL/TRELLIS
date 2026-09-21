@@ -1,59 +1,34 @@
-# ------------------------------------------------------------
-# generator.py
-# Minimal TRELLIS wrapper required by the host platform.
-# ------------------------------------------------------------
-# The host will import this file, look for the class name given
-# in manifest["generator_class"] (“Generator”), instantiate it,
-# and call its .generate(prompt, **kwargs) method.
-# ------------------------------------------------------------
-
 import os
 import sys
 import pathlib
 from typing import Any, Dict, List
 
-# ------------------------------------------------------------------
-# Make sure the TRELLIS package can be imported even if the host runs
-# this file from a different working directory.
-# ------------------------------------------------------------------
-repo_root = pathlib.Path(__file__).parents[2]   # <repo‑root>/app_folder/..
+# Ensure the TRELLIS package can be imported even if run from a different cwd
+repo_root = pathlib.Path(__file__).parents[2]
 sys.path.append(str(repo_root))
 
 try:
     from trellis.models import ModelFactory
 except Exception as exc:
     raise ImportError(
-        "Could not import TRELLIS. Make sure the repository is "
-        "installed (`pip install -r requirements.txt`)."
+        "Could not import TRELLIS. Make sure the repository is installed "
+        "(pip install -r requirements.txt)."
     ) from exc
 
-# ------------------------------------------------------------------
-# Load a model once (global singleton).  Default is the tiny “gpt2”
-# which works on any machine.  Override with the env var
-# TRELLIS_MODEL if you want a larger model.
-# ------------------------------------------------------------------
+# Load a default model once (global singleton). Env var TRELLIS_MODEL can override.
 _MODEL_NAME: str = os.getenv("TRELLIS_MODEL", "gpt2")
 _factory = ModelFactory.from_pretrained(_MODEL_NAME)
 
 
-# ------------------------------------------------------------------
-# The class name must match the value in manifest["generator_class"]
-# ------------------------------------------------------------------
 class Generator:
-    """
-    Host‑side generator class.
+    """Host‑side generator class expected by the platform.
 
-    The host will do roughly:
-        from generator import Generator
-        gen = Generator()
-        result = gen.generate(prompt="…", max_new_tokens=128, …)
-
-    The method returns a JSON‑serialisable dict containing the generated
-    text and a few meta‑fields.
+    The platform will instantiate this class and call ``generate``.
+    ``generate`` returns a JSON‑serialisable dict.
     """
 
     def __init__(self) -> None:
-        # Nothing to initialise – the model is already loaded globally.
+        # No per‑instance state needed – the model is loaded globally.
         pass
 
     def generate(
@@ -65,30 +40,10 @@ class Generator:
         top_p: float = 0.95,
         **extra: Any,
     ) -> Dict[str, Any]:
-        """
-        Parameters
-        ----------
-        prompt : str
-            Text that seeds generation.
-        max_new_tokens, temperature, top_k, top_p : generation knobs.
-        **extra : Any
-            Catch‑all for any additional arguments the host may pass.
-
-        Returns
-        -------
-        dict
-            {
-                "generated_text": <text>,
-                "model": <model‑name>,
-                "prompt": <prompt>,
-                "settings": {max_new_tokens, temperature, top_k, top_p}
-            }
-        """
-        # Guard against a non‑string prompt (some hosts use `input` instead)
+        """Generate text from a prompt."""
         if not isinstance(prompt, str):
             prompt = str(extra.get("input", ""))
 
-        # TRELLIS generate returns a list of strings; we ask for one.
         outputs: List[str] = _factory.generate(
             prompt,
             max_new_tokens=max_new_tokens,
@@ -111,9 +66,8 @@ class Generator:
             },
         }
 
-# ------------------------------------------------------------------
-# Optional CLI for local testing (does not affect the host)
-# ------------------------------------------------------------------
+
+# Optional CLI for quick local testing
 if __name__ == "__main__":
     import argparse, json
 
