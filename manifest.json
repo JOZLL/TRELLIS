@@ -1,5 +1,5 @@
 {
-  "id": "trellis-modly",          // ← unique identifier (change as you wish)
+  "id": "com.modly.trellis-demo",
   "name": "trellis-demo",
   "version": "0.1.0",
   "description": "A minimal TRELLIS‑based generator for the host platform.",
