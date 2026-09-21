@@ -1,15 +1,14 @@
 {
+  "id": "trellis-modly",          // ← unique identifier (change as you wish)
   "name": "trellis-demo",
   "version": "0.1.0",
   "description": "A minimal TRELLIS‑based generator for the host platform.",
   "entry_point": "generator.py",
+  "python_version": ">=3.9",
   "dependencies": [
     "torch>=2.0",
     "transformers",
     "accelerate",
     "sentencepiece"
-  ],
-  "python_version": ">=3.9"
+  ]
 }
-
-
