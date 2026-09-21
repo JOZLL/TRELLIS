@@ -1,5 +1,5 @@
 {
-  "id": "com.example.trellis-demo",
+  "id": "com.JOZLL.trellis-demo",
   "name": "trellis-demo",
   "version": "0.1.0",
   "description": "Minimal TRELLIS wrapper that exposes a generate() method for the host platform.",
@@ -11,5 +11,37 @@
     "transformers",
     "accelerate",
     "sentencepiece"
+  ],
+  "nodes": [
+    {
+      "id": "text-to-mesh-base",
+      "capability_id": "text-to-mesh-base",
+      "input": "image",
+      "output": "mesh",
+      "hf_repo": "microsoft/TRELLIS-text-base",
+      "weight_owner_id": "text-base",
+      "download_check": "pipeline.json",
+      "params_schema": [{ "id": "prompt", "type": "string" }]
+    },
+    {
+      "id": "text-to-mesh-large",
+      "capability_id": "text-to-mesh-large",
+      "input": "image",
+      "output": "mesh",
+      "hf_repo": "microsoft/TRELLIS-text-large",
+      "weight_owner_id": "text-large",
+      "download_check": "pipeline.json",
+      "params_schema": [{ "id": "prompt", "type": "string" }]
+    },
+    {
+      "id": "text-to-mesh",
+      "capability_id": "text-to-mesh",
+      "input": "image",
+      "output": "mesh",
+      "hf_repo": "microsoft/TRELLIS-text-xlarge",
+      "weight_owner_id": "text-xlarge",
+      "download_check": "pipeline.json",
+      "params_schema": [{ "id": "prompt", "type": "string" }]
+    }
   ]
 }
