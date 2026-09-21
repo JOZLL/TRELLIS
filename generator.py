@@ -1,35 +1,53 @@
+# trellis_fork/generator.py
 import os
 import sys
 import pathlib
 from typing import Any, Dict, List
 
-# Ensure the TRELLIS package can be imported even if run from a different cwd
-repo_root = pathlib.Path(__file__).parents[2]
-sys.path.append(str(repo_root))
+# --------------------------------------------------------------
+# Make the repository root the *first* entry on sys.path.
+# This ensures that a local stub of Kaolin (if you keep one) is found
+# before the placeholder wheel in site‑packages.
+# --------------------------------------------------------------
+repo_root = pathlib.Path(__file__).parents[2].resolve()
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))   # <‑‑ PREPEND, not append
 
-try:
-    from trellis.models import ModelFactory
-except Exception as exc:
-    raise ImportError(
-        "Could not import TRELLIS. Make sure the repository is installed "
-        "(pip install -r requirements.txt)."
-    ) from exc
-
-# Load a default model once (global singleton). Env var TRELLIS_MODEL can override.
+# -----------------------------------------------------------------
+# The heavy TRELLIS import is now done lazily inside generate().
+# If the import fails we fall back to a very simple echo implementation.
+# -----------------------------------------------------------------
 _MODEL_NAME: str = os.getenv("TRELLIS_MODEL", "gpt2")
-_factory = ModelFactory.from_pretrained(_MODEL_NAME)
+_factory = None               # will be set lazily
+_TRELLIS_AVAILABLE = False   # flag set after a successful import
+_IMPORT_ERROR = None          # keep the original exception for debugging
 
 
 class Generator:
-    """Host‑side generator class expected by the platform.
+    """Modly‑compatible generator.
 
-    The platform will instantiate this class and call ``generate``.
-    ``generate`` returns a JSON‑serialisable dict.
+    If the full TRELLIS stack can be imported, we delegate to its
+    ``ModelFactory``.  Otherwise we return a `[fallback]` string so that the
+    extension loads without crashing.
     """
 
     def __init__(self) -> None:
-        # No per‑instance state needed – the model is loaded globally.
         pass
+
+    def _ensure_trellis(self) -> None:
+        """Import TRELLIS on first use.  Sets globals _factory and _TRELLIS_AVAILABLE."""
+        global _factory, _TRELLIS_AVAILABLE, _IMPORT_ERROR
+        if _TRELLIS_AVAILABLE:
+            return
+        try:
+            # Import *after* the repo root has been prepended.
+            from trellis.models import ModelFactory  # type: ignore
+            _factory = ModelFactory.from_pretrained(_MODEL_NAME)  # may raise
+            _TRELLIS_AVAILABLE = True
+        except Exception as exc:  # pragma: no cover
+            _IMPORT_ERROR = exc
+            _TRELLIS_AVAILABLE = False
+            _factory = None
 
     def generate(
         self,
@@ -40,23 +58,33 @@ class Generator:
         top_p: float = 0.95,
         **extra: Any,
     ) -> Dict[str, Any]:
-        """Generate text from a prompt."""
+        """Generate text (or fallback)."""
         if not isinstance(prompt, str):
             prompt = str(extra.get("input", ""))
 
-        outputs: List[str] = _factory.generate(
-            prompt,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            top_k=top_k,
-            top_p=top_p,
-            num_return_sequences=1,
-        )
-        generated = outputs[0] if outputs else ""
+        # Try the real TRELLIS implementation first.
+        self._ensure_trellis()
+        if _TRELLIS_AVAILABLE and _factory is not None:
+            outputs: List[str] = _factory.generate(
+                prompt,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                top_k=top_k,
+                top_p=top_p,
+                num_return_sequences=1,
+            )
+            generated = outputs[0] if outputs else ""
+            model_name = _MODEL_NAME
+        else:
+            # -----------------------------------------------------------------
+            # Fallback path – works on any machine, no native dependencies needed.
+            # -----------------------------------------------------------------
+            generated = f"[fallback] {prompt}"
+            model_name = "fallback"
 
-        return {
+        result: Dict[str, Any] = {
             "generated_text": generated,
-            "model": _MODEL_NAME,
+            "model": model_name,
             "prompt": prompt,
             "settings": {
                 "max_new_tokens": max_new_tokens,
@@ -66,27 +94,25 @@ class Generator:
             },
         }
 
+        # Attach the original traceback only when we are in fallback mode,
+        # so you can inspect why the real stack failed (useful for debugging).
+        if not _TRELLIS_AVAILABLE and _IMPORT_ERROR is not None:
+            result["import_error"] = str(_IMPORT_ERROR)
 
-# Optional CLI for quick local testing
+        return result
+
+
+# -----------------------------------------------------------------
+# Small CLI – handy for manual testing.
+# -----------------------------------------------------------------
 if __name__ == "__main__":
     import argparse, json
 
     parser = argparse.ArgumentParser(
-        description="Local test for the TRELLIS Generator wrapper"
+        description="Test the TRELLIS‑wrapper (fallback works out‑of‑the‑box)."
     )
     parser.add_argument("prompt", help="Prompt text")
-    parser.add_argument("--max_new_tokens", type=int, default=128)
-    parser.add_argument("--temperature", type=float, default=0.8)
-    parser.add_argument("--top_k", type=int, default=50)
-    parser.add_argument("--top_p", type=float, default=0.95)
-
     args = parser.parse_args()
     gen = Generator()
-    result = gen.generate(
-        prompt=args.prompt,
-        max_new_tokens=args.max_new_tokens,
-        temperature=args.temperature,
-        top_k=args.top_k,
-        top_p=args.top_p,
-    )
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    out = gen.generate(args.prompt)
+    print(json.dumps(out, ensure_ascii=False, indent=2))
