@@ -1,90 +1,134 @@
-# generator.py – defensive edition
-import os, sys, pathlib
+# ------------------------------------------------------------
+# generator.py
+# Minimal TRELLIS wrapper required by the host platform.
+# ------------------------------------------------------------
+# The host will import this file, look for the class name given
+# in manifest["generator_class"] (“Generator”), instantiate it,
+# and call its .generate(prompt, **kwargs) method.
+# ------------------------------------------------------------
+
+import os
+import sys
+import pathlib
 from typing import Any, Dict, List
 
 # ------------------------------------------------------------------
-# Make sure we can import the TRELLIS package even if the host runs us
-# from a sub‑directory.  This walks two levels up (repo root) and
-# adds it to sys.path.
+# Make sure the TRELLIS package can be imported even if the host runs
+# this file from a different working directory.
 # ------------------------------------------------------------------
-repo_root = pathlib.Path(__file__).parents[2]          # …/app_my_trellis/..
+repo_root = pathlib.Path(__file__).parents[2]   # <repo‑root>/app_folder/..
 sys.path.append(str(repo_root))
 
 try:
     from trellis.models import ModelFactory
 except Exception as exc:
     raise ImportError(
-        "TRELLIS could not be imported. Did you run `pip install -e .` "
-        "from the repo root? Original error: " + str(exc)
+        "Could not import TRELLIS. Make sure the repository is "
+        "installed (`pip install -r requirements.txt`)."
     ) from exc
 
 # ------------------------------------------------------------------
-# Model loading (once)
+# Load a model once (global singleton).  Default is the tiny “gpt2”
+# which works on any machine.  Override with the env var
+# TRELLIS_MODEL if you want a larger model.
 # ------------------------------------------------------------------
 _MODEL_NAME: str = os.getenv("TRELLIS_MODEL", "gpt2")
 _factory = ModelFactory.from_pretrained(_MODEL_NAME)
 
+
 # ------------------------------------------------------------------
-# Public generate() – robust against missing/incorrect prompt key
+# The class name must match the value in manifest["generator_class"]
 # ------------------------------------------------------------------
-def generate(
-    prompt: str = "",
-    max_new_tokens: int = 128,
-    temperature: float = 0.8,
-    top_k: int = 50,
-    top_p: float = 0.95,
-    **extra: Any,
-) -> Dict[str, Any]:
-    # If the caller gave us a non‑string or used a different key, coerce it.
-    if not isinstance(prompt, str):
-        # Look for common alternatives
-        prompt = (
-            extra.get("input")
-            or extra.get("text")
-            or ""
-        )
+class Generator:
+    """
+    Host‑side generator class.
+
+    The host will do roughly:
+        from generator import Generator
+        gen = Generator()
+        result = gen.generate(prompt="…", max_new_tokens=128, …)
+
+    The method returns a JSON‑serialisable dict containing the generated
+    text and a few meta‑fields.
+    """
+
+    def __init__(self) -> None:
+        # Nothing to initialise – the model is already loaded globally.
+        pass
+
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 128,
+        temperature: float = 0.8,
+        top_k: int = 50,
+        top_p: float = 0.95,
+        **extra: Any,
+    ) -> Dict[str, Any]:
+        """
+        Parameters
+        ----------
+        prompt : str
+            Text that seeds generation.
+        max_new_tokens, temperature, top_k, top_p : generation knobs.
+        **extra : Any
+            Catch‑all for any additional arguments the host may pass.
+
+        Returns
+        -------
+        dict
+            {
+                "generated_text": <text>,
+                "model": <model‑name>,
+                "prompt": <prompt>,
+                "settings": {max_new_tokens, temperature, top_k, top_p}
+            }
+        """
+        # Guard against a non‑string prompt (some hosts use `input` instead)
         if not isinstance(prompt, str):
-            prompt = str(prompt)
+            prompt = str(extra.get("input", ""))
 
-    outputs: List[str] = _factory.generate(
-        prompt,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-        top_k=top_k,
-        top_p=top_p,
-        num_return_sequences=1,
-    )
-    generated = outputs[0] if outputs else ""
+        # TRELLIS generate returns a list of strings; we ask for one.
+        outputs: List[str] = _factory.generate(
+            prompt,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            top_k=top_k,
+            top_p=top_p,
+            num_return_sequences=1,
+        )
+        generated = outputs[0] if outputs else ""
 
-    return {
-        "generated_text": generated,
-        "model": _MODEL_NAME,
-        "prompt": prompt,
-        "settings": {
-            "max_new_tokens": max_new_tokens,
-            "temperature": temperature,
-            "top_k": top_k,
-            "top_p": top_p,
-        },
-    }
+        return {
+            "generated_text": generated,
+            "model": _MODEL_NAME,
+            "prompt": prompt,
+            "settings": {
+                "max_new_tokens": max_new_tokens,
+                "temperature": temperature,
+                "top_k": top_k,
+                "top_p": top_p,
+            },
+        }
 
 # ------------------------------------------------------------------
-# Optional CLI (unchanged)
+# Optional CLI for local testing (does not affect the host)
 # ------------------------------------------------------------------
 if __name__ == "__main__":
     import argparse, json
 
     parser = argparse.ArgumentParser(
-        description="Simple CLI wrapper around the `generate` function."
+        description="Local test for the TRELLIS Generator wrapper"
     )
-    parser.add_argument("prompt", help="Prompt text to seed generation")
+    parser.add_argument("prompt", help="Prompt text")
     parser.add_argument("--max_new_tokens", type=int, default=128)
     parser.add_argument("--temperature", type=float, default=0.8)
     parser.add_argument("--top_k", type=int, default=50)
     parser.add_argument("--top_p", type=float, default=0.95)
-    args = parser.parse_args()
 
-    result = generate(
+    args = parser.parse_args()
+    gen = Generator()
+    result = gen.generate(
         prompt=args.prompt,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
